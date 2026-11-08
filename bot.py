@@ -326,4 +326,156 @@ async def show_all_numbers_admin(update: Update, context: ContextTypes.DEFAULT_T
     cursor = conn.cursor()
     cursor.execute("""
         SELECT n.number, n.status, u.phone_number 
-        FROM
+        FROM numbers n 
+        LEFT JOIN users u ON n.user_id = u.user_id 
+        ORDER BY n.number ASC
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    if not rows:
+        await update.message.reply_text("📊 ምንም ቁጥሮች የሉም።")
+        return
+
+    msg = "📊 **የዕጣ ቁጥሮች ሙሉ ሁኔታ (አድሚን እይታ):**\n\n"
+    for r in rows:
+        num, status, phone = r
+        if status == 'BOOKED' or status == 'PENDING':
+            masked_phone = phone[:6] + "...." + phone[-2:] if phone and len(phone) >= 8 else (phone or "ያለ ስልክ")
+            icon = "✅" if status == 'BOOKED' else "🟡"
+            msg += f"{num} 👉 {masked_phone} {icon}\n"
+        else:
+            msg += f"{num} 👉 (ነፃ)\n"
+
+    if len(msg) > 4000:
+        parts = [msg[i:i+4000] for i in range(0, len(msg), 4000)]
+        for p in parts:
+            await update.message.reply_text(p, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def release_number_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text("🗑️ ሊያጠፉት ወይም ነፃ ሊያደርጉት የሚፈልጉትን ቁጥር ብቻውን ይጻፉ (ለምሳሌ: `45`):", reply_markup=get_back_keyboard())
+    context.user_data['admin_action_type'] = 'release'
+    return ADMIN_ACTION
+
+async def add_numbers_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    await update.message.reply_text("➕ ወደ ዳታቤዝ ለመጨመር ወይም አጠቃላይ ብዛቱን ለማስተካከል የሚፈልጉትን ከፍተኛ ቁጥር ያስገቡ (ለምሳሌ: `250`):", reply_markup=get_back_keyboard())
+    context.user_data['admin_action_type'] = 'add'
+    return ADMIN_ACTION
+
+async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return ConversationHandler.END
+    text = update.message.text.strip()
+    action_type = context.user_data.get('admin_action_type')
+
+    conn = sqlite3.connect("edu_mezenna.db")
+    cursor = conn.cursor()
+    if action_type == 'release':
+        if not text.isdigit():
+            await update.message.reply_text("እባክዎ ትክክለኛ ቁጥር ያስገቡ:", reply_markup=get_back_keyboard())
+            conn.close()
+            return ADMIN_ACTION
+        num = int(text)
+        cursor.execute("UPDATE numbers SET status = 'AVAILABLE', user_id = NULL WHERE number = ?", (num,))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"✅ ቁጥር **{num}** ተሰርዞ አሁን ነፃ (AVAILABLE) ሆኗል!", reply_markup=get_main_keyboard(True), parse_mode="Markdown")
+    elif action_type == 'add':
+        if not text.isdigit():
+            await update.message.reply_text("እባክዎ ትክክለኛ ቁጥር ያስገቡ:", reply_markup=get_back_keyboard())
+            conn.close()
+            return ADMIN_ACTION
+        max_num = int(text)
+        for i in range(1, max_num + 1):
+            cursor.execute("INSERT OR IGNORE INTO numbers (number, status) VALUES (?, 'AVAILABLE')", (i,))
+        conn.commit()
+        conn.close()
+        await update.message.reply_text(f"✅ እስከ **{max_num}** ያሉት ቁጥሮች ተስተካክለዋል/ተጨምረዋል!", reply_markup=get_main_keyboard(True), parse_mode="Markdown")
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("ተሰርዟል።", reply_markup=get_main_keyboard(update.effective_user.id == ADMIN_ID))
+    return ConversationHandler.END
+
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Edu Online Mezenna Bot is running!")
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
+    server.serve_forever()
+
+def main():
+    if not TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN አልተገኘም!")
+        return
+
+    t = threading.Thread(target=run_http_server)
+    t.daemon = True
+    t.start()
+
+    application = ApplicationBuilder().token(TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🔢 ቁጥር መያዝ$"), choose_number_start)],
+        states={
+            SELECTING_NUMBERS: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_numbers)
+            ],
+            FULL_NAME: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_full_name)
+            ],
+            PHONE_NUMBER: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_phone_number)
+            ],
+            PAYMENT_SCREENSHOT: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.PHOTO | filters.TEXT, receive_screenshot)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    admin_conv_handler = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex("^🗑 ቁጥር መሰረዝ \\(Release\\)$"), release_number_prompt),
+            MessageHandler(filters.Regex("^➕ አዲስ ቁጥሮችን መጨመር$"), add_numbers_prompt)
+        ],
+        states={
+            ADMIN_ACTION: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_admin_action)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+    )
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(conv_handler)
+    application.add_handler(admin_conv_handler)
+    application.add_handler(CallbackQueryHandler(admin_callback))
+    application.add_handler(MessageHandler(filters.Regex("^📋 ነፃ ቁጥሮች ማየት$"), show_free_numbers))
+    application.add_handler(MessageHandler(filters.Regex("^⚙️ አድሚን መቆጣጠሪያ$"), admin_panel))
+    application.add_handler(MessageHandler(filters.Regex("^📊 የተያዙ እና ነፃ ቁጥሮች ማየት$"), show_all_numbers_admin))
+    application.add_handler(MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start))
+    application.add_handler(MessageHandler(filters.Regex("^ℹ️ መረጃ$"), info_handler))
+    application.add_handler(MessageHandler(filters.Regex("^📞 እገዛ$"), help_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
+
+    logger.info("🤖 Edu Online Mezenna ቦት በሥራ ላይ ነው...")
+    application.run_polling()
+
+if __name__ == "__main__":
+    main()
