@@ -3,7 +3,7 @@ import sqlite3
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
-from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -118,7 +118,27 @@ async def show_free_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(response_msg, parse_mode="Markdown")
 
-# ⚙️ አድሚን መቆጣጠሪያ ሜኑ
+# ℹ️ መረጃ
+async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "ℹ️ **የአገልግሎት መረጃ፦**\n\n"
+        "ኤዱ ከአረካ online መዝናኛ\n"
+        "🔥 **ፈጣን ዕለታው ዕቁብ** 🔥\n"
+        "📌 **በ100 ብር 12,000 ብር ደራሽ** (25ተኛ ዙር)\n\n"
+        "ይህ ቦት ተሳታፊዎች ምዝገባን እና ክፍያ ክትትልን በራስ ሰር ለማስተካከል የተዘጋጀ ነው።"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# 📞 እገዛ
+async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📞 **እገዛ እና ድጋፍ፦**\n\n"
+        "ማንኛውም ችግር ሲያጋጥምዎ ወይም እርዳታ ሲፈልጉ በቀጥታ አድሚኑን ማነጋገር ይችላሉ።\n\n"
+        f"👤 **የአድሚን ስልክ ቁጥር፦** `{ADMIN_PHONE}`"
+    )
+    await update.message.reply_text(text, parse_mode="Markdown")
+
+# ⚙️ አድሚን መቆጣጠሪያ ፓነል
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
@@ -142,7 +162,6 @@ async def choose_number_start(update: Update, context: ContextTypes.DEFAULT_TYPE
 # የቁጥሮች ግቤት መቀበል እና ማረጋገጥ
 async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
-    # ኮማዎችን እና ስፔሶችን አስተካክሎ ቁጥሮችን መለየት
     raw_nums = text.replace(" ", "").split(",")
     
     selected_nums = []
@@ -159,7 +178,6 @@ async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn = sqlite3.connect("edu_mezenna.db")
     cursor = conn.cursor()
 
-    # ቁጥሮቹ ክፍት መሆናቸውን ማረጋገጥ
     unavailable_nums = []
     for num in selected_nums:
         cursor.execute("SELECT status FROM numbers WHERE number = ?", (num,))
@@ -192,4 +210,10 @@ async def receive_phone_number(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['phone_number'] = update.message.text.strip()
     selected_nums = context.user_data['selected_numbers']
     total_price = len(selected_nums) * 100
-    nums_str = ", ".
+    nums_str = ", ".join(map(str, selected_nums))
+    
+    payment_text = (
+        f"💳 **የክፍያ ማስተላለፊያ መረጃ (25ተኛ ዙር):**\n\n"
+        f"የመረጧቸው ቁጥሮች: **{nums_str}**\n"
+        f"ጠቅላላ የቁጥር ብዛት: **{len(selected_nums)}**\n"
+        f"💰 **አጠቃላይ የሚከፈለው ብር:** **{total_price} ብር**\n\n"
