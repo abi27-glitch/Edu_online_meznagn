@@ -181,6 +181,27 @@ async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     conn.close()
     context.user_data['selected_numbers'] = selected_nums
+
+    user = update.effective_user
+    # አድሚን ከሆነ በነፃ ወዲያውኑ ይያዝለት (ክፍያ አያስፈልገውም)
+    if user.id == ADMIN_ID:
+        conn = sqlite3.connect("edu_mezenna.db")
+        cursor = conn.cursor()
+        for num in selected_nums:
+            cursor.execute("UPDATE numbers SET status = 'BOOKED', user_id = ? WHERE number = ?", (user.id, num))
+        conn.commit()
+        conn.close()
+
+        nums_str = ", ".join(map(str, selected_nums))
+        await update.message.reply_text(
+            f"👑 **አድሚን ስለሆኑ ቁጥሮቹ በነፃ ተይዘዋል!**\n\n"
+            f"🔢 የያዟቸው ቁጥሮች: **{nums_str}**\n\n"
+            "መልካም ዕድል!!",
+            reply_markup=get_main_keyboard(True),
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
     await update.message.reply_text(
         f"አሪፍ! የመረጧቸው ቁጥሮች ብዛት: **{len(selected_nums)}** ናቸው።\n\nአሁን እባክዎ **ሙሉ ስምዎን (First & Last Name)** ይጻፉልን፦",
         reply_markup=get_back_keyboard(),
@@ -341,9 +362,10 @@ async def show_all_numbers_admin(update: Update, context: ContextTypes.DEFAULT_T
     for r in rows:
         num, status, phone = r
         if status == 'BOOKED' or status == 'PENDING':
-            masked_phone = phone[:6] + "...." + phone[-2:] if phone and len(phone) >= 8 else (phone or "ያለ ስልክ")
+            # ሙሉ ስልክ ቁጥሩን ማሳየት (ማስክ (mask) ሳይደረግ)
+            full_phone = phone if phone else "ያለ ስልክ"
             icon = "✅" if status == 'BOOKED' else "🟡"
-            msg += f"{num} 👉 {masked_phone} {icon}\n"
+            msg += f"{num} 👉 {full_phone} {icon}\n"
         else:
             msg += f"{num} 👉 (ነፃ)\n"
 
