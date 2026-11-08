@@ -280,4 +280,50 @@ async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for num in nums_list:
             cursor.execute("UPDATE numbers SET status = 'BOOKED' WHERE number = ?", (num,))
         cursor.execute("UPDATE transactions SET status = 'APPROVED' WHERE user_id = ? AND numbers_list = ?", (target_user_id, nums_str))
-        cursor.execute("SELECT full_name, phone_number FROM users WHERE user_id = ?", (target
+        cursor.execute("SELECT full_name, phone_number FROM users WHERE user_id = ?", (target_user_id,))
+        user_row = cursor.fetchone()
+        conn.commit()
+        conn.close()
+
+        if user_row:
+            f_name, f_phone = user_row
+            success_msg = (
+                f"🎉 **እንኳን ደስ አለዎት! ክፍያዎ ጸድቋል!**\n\n"
+                f"👤 ስም: {f_name}\n"
+                f"📞 ስልክ: {f_phone}\n"
+                f"🔢 የያዙዋቸው ቁጥሮች: **{nums_str}**\n\n"
+                "መልካም ዕድል!!"
+            )
+            try:
+                await context.bot.send_message(chat_id=target_user_id, text=success_msg, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"ለተጠቃሚው ማሳወቂያ መላክ አልተቻለም: {e}")
+
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n✅ **ሁኔታ:** ክፍያው በአድሚን ጸድቋል!")
+
+    elif action == "reject":
+        for num in nums_list:
+            cursor.execute("UPDATE numbers SET status = 'AVAILABLE', user_id = NULL WHERE number = ?", (num,))
+        cursor.execute("UPDATE transactions SET status = 'REJECTED' WHERE user_id = ? AND numbers_list = ?", (target_user_id, nums_str))
+        conn.commit()
+        conn.close()
+
+        reject_msg = (
+            f"❌ **ይቅርታ! ክፍያዎ ተቀባይነት አላገኘም (ውድቅ ተደርጓል)**\n\n"
+            f"የመረጧቸው ቁጥሮች (**{nums_str}**) ተሰርዘዋል። እባክዎ ትክክለኛ የክፍያ ስክሪንሾት በመላክ እንደገና ይሞክሩ።"
+        )
+        try:
+            await context.bot.send_message(chat_id=target_user_id, text=reject_msg, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"ለተጠቃሚው ውድቅ መደረጉን መላክ አልተቻለም: {e}")
+
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n❌ **ሁኔታ:** ክፍያው ውድቅ ተደርጓል!")
+
+async def show_all_numbers_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+    conn = sqlite3.connect("edu_mezenna.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT n.number, n.status, u.phone_number 
+        FROM
