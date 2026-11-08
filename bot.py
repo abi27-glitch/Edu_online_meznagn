@@ -74,6 +74,13 @@ def get_main_keyboard(is_admin=False):
         keyboard.append(["⚙️ አድሚን መቆጣጠሪያ"])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+# በሂደት ውስጥ (Conversation ውስጥ) የሚታይ የባክ ቁልፍ ኪቦርድ
+def get_back_keyboard():
+    keyboard = [
+        ["🔙 ወደ ዋና ሜኑ"]
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     is_admin = (user.id == ADMIN_ID)
@@ -132,7 +139,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         ["📊 የተያዙ ቁጥሮች ማየት"],
         ["🗑 ቁጥር መሰረዝ (Release)", "➕ አዲስ ቁጥሮችን መጨመር"],
-        ["⬅️ ወደ ዋና ሜኑ መመለስ"]
+        ["🔙 ወደ ዋና ሜኑ"]
     ]
     await update.message.reply_text("⚙️ **የአድሚን መቆጣጠሪያ ፓነል:**", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True), parse_mode="Markdown")
 
@@ -142,7 +149,7 @@ async def choose_number_start(update: Update, context: ContextTypes.DEFAULT_TYPE
         "እባክዎ የሚፈልጉትን ቁጥሮች በኮማ (comma) ለይተው ይጻፉልን (ለምሳሌ፦ `41,67,81,8,91,117` ብለው ይላኩ)።\n"
         "*(እያንዳንዱ ቁጥር 100 ብር ይመደብለታል)*"
     )
-    await update.message.reply_text(text, parse_mode="Markdown")
+    await update.message.reply_text(text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
     return SELECTING_NUMBERS
 
 async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -151,12 +158,12 @@ async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     selected_nums = []
     for n_str in raw_nums:
         if not n_str.isdigit():
-            await update.message.reply_text(f"⚠️ **{n_str}** ትክክለኛ ቁጥር አይደለም። እባክዎ ሁሉንም ቁጥሮች በትክክል በኮማ ለይተው እንደገና ይጻፉ:")
+            await update.message.reply_text(f"⚠️ **{n_str}** ትክክለኛ ቁጥር አይደለም። እባክዎ ሁሉንም ቁጥሮች በትክክል በኮማ ለይተው እንደገና ይጻፉ:", reply_markup=get_back_keyboard())
             return SELECTING_NUMBERS
         selected_nums.append(int(n_str))
 
     if not selected_nums:
-        await update.message.reply_text("እባክዎ ቢያንስ አንድ ቁጥር ይምረጡ:")
+        await update.message.reply_text("እባክዎ ቢያንስ አንድ ቁጥር ይምረጡ:", reply_markup=get_back_keyboard())
         return SELECTING_NUMBERS
 
     conn = sqlite3.connect("edu_mezenna.db")
@@ -170,20 +177,21 @@ async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if unavailable_nums:
         conn.close()
-        await update.message.reply_text(f"⚠️ ይቅርታ! የሚከተሉት ቁጥሮች ({', '.join(map(str, unavailable_nums))}) ተይዘዋል ወይም በሂደት ላይ ናቸው። እባክዎ ነፃ ቁጥሮችን ብቻ በመምረጥ እንደገና ይሞክሩ:")
+        await update.message.reply_text(f"⚠️ ይቅርታ! የሚከተሉት ቁጥሮች ({', '.join(map(str, unavailable_nums))}) ተይዘዋል ወይም በሂደት ላይ ናቸው። እባክዎ ነፃ ቁጥሮችን ብቻ በመምረጥ እንደገና ይሞክሩ:", reply_markup=get_back_keyboard())
         return SELECTING_NUMBERS
 
     conn.close()
     context.user_data['selected_numbers'] = selected_nums
     await update.message.reply_text(
         f"አሪፍ! የመረጧቸው ቁጥሮች ብዛት: **{len(selected_nums)}** ናቸው።\n\nአሁን እባክዎ **ሙሉ ስምዎን (First & Last Name)** ይጻፉልን፦",
+        reply_markup=get_back_keyboard(),
         parse_mode="Markdown"
     )
     return FULL_NAME
 
 async def receive_full_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['full_name'] = update.message.text.strip()
-    await update.message.reply_text("እጅግ መልካም! አሁን ደግሞ **ስልክ ቁጥርዎን** ያስገቡልን፦")
+    await update.message.reply_text("እጅግ መልካም! አሁን ደግሞ **ስልክ ቁጥርዎን** ያስገቡልን፦", reply_markup=get_back_keyboard())
     return PHONE_NUMBER
 
 async def receive_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,12 +209,12 @@ async def receive_phone_number(update: Update, context: ContextTypes.DEFAULT_TYP
         "📱 **Telebirr:**\n`0941506799`\n\n"
         "🏦 **Dashen Bank:**\n`5273247599011`"
     )
-    await update.message.reply_text(payment_text, parse_mode="Markdown")
+    await update.message.reply_text(payment_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
     return PAYMENT_SCREENSHOT
 
 async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message.photo:
-        await update.message.reply_text("እባክዎ የክፍያውን ማረጋገጫ **ስክሪንሾት (Photo)** በመላክ ይተባበሩን:")
+        await update.message.reply_text("እባክዎ የክፍያውን ማረጋገጫ **ስክሪንሾት (Photo)** በመላክ ይተባበሩን:", reply_markup=get_back_keyboard())
         return PAYMENT_SCREENSHOT
 
     photo_file = update.message.photo[-1].file_id
@@ -412,10 +420,22 @@ def main():
     conv_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🔢 ቁጥር መያዝ$"), choose_number_start)],
         states={
-            SELECTING_NUMBERS: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_numbers)],
-            FULL_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_full_name)],
-            PHONE_NUMBER: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_phone_number)],
-            PAYMENT_SCREENSHOT: [MessageHandler(filters.PHOTO | filters.TEXT, receive_screenshot)],
+            SELECTING_NUMBERS: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_numbers)
+            ],
+            FULL_NAME: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_full_name)
+            ],
+            PHONE_NUMBER: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_phone_number)
+            ],
+            PAYMENT_SCREENSHOT: [
+                MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start),
+                MessageHandler(filters.PHOTO | filters.TEXT, receive_screenshot)
+            ],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -438,7 +458,7 @@ def main():
     application.add_handler(MessageHandler(filters.Regex("^📋 ነፃ ቁጥሮች ማየት$"), show_free_numbers))
     application.add_handler(MessageHandler(filters.Regex("^⚙️ አድሚን መቆጣጠሪያ$"), admin_panel))
     application.add_handler(MessageHandler(filters.Regex("^📊 የተያዙ ቁጥሮች ማየት$"), show_booked_numbers_admin))
-    application.add_handler(MessageHandler(filters.Regex("^⬅️ ወደ ዋና ሜኑ መመለስ$"), start))
+    application.add_handler(MessageHandler(filters.Regex("^🔙 ወደ ዋና ሜኑ$"), start))
     application.add_handler(MessageHandler(filters.Regex("^ℹ️ መረጃ$"), info_handler))
     application.add_handler(MessageHandler(filters.Regex("^📞 እገዛ$"), help_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, start))
