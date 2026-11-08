@@ -137,7 +137,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     keyboard = [
         ["📊 የተያዙ እና ነፃ ቁጥሮች ማየት"],
-        ["🗑 ቁጥር መሰረዝ (Release)", "➕ አዲስ ቁጥሮችን መጨመር"],
+        ["🗑 ቁጥር መሰረዝ (Release)", "🔄 የዕጣ አጠቃላይ ብዛት ማስተካከል (መጨመር/መቀነስ)"],
         ["🔙 ወደ ዋና ሜኑ"]
     ]
     await update.message.reply_text("⚙️ **የአድሚን መቆጣጠሪያ ፓነል:**", reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True), parse_mode="Markdown")
@@ -182,26 +182,6 @@ async def receive_numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.close()
     context.user_data['selected_numbers'] = selected_nums
 
-    user = update.effective_user
-    # አድሚን ከሆነ በነፃ ወዲያውኑ ይያዝለት (ክፍያ አያስፈልገውም)
-    if user.id == ADMIN_ID:
-        conn = sqlite3.connect("edu_mezenna.db")
-        cursor = conn.cursor()
-        for num in selected_nums:
-            cursor.execute("UPDATE numbers SET status = 'BOOKED', user_id = ? WHERE number = ?", (user.id, num))
-        conn.commit()
-        conn.close()
-
-        nums_str = ", ".join(map(str, selected_nums))
-        await update.message.reply_text(
-            f"👑 **አድሚን ስለሆኑ ቁጥሮቹ በነፃ ተይዘዋል!**\n\n"
-            f"🔢 የያዟቸው ቁጥሮች: **{nums_str}**\n\n"
-            "መልካም ዕድል!!",
-            reply_markup=get_main_keyboard(True),
-            parse_mode="Markdown"
-        )
-        return ConversationHandler.END
-
     await update.message.reply_text(
         f"አሪፍ! የመረጧቸው ቁጥሮች ብዛት: **{len(selected_nums)}** ናቸው።\n\nአሁን እባክዎ **ሙሉ ስምዎን (First & Last Name)** ይጻፉልን፦",
         reply_markup=get_back_keyboard(),
@@ -215,8 +195,34 @@ async def receive_full_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PHONE_NUMBER
 
 async def receive_phone_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['phone_number'] = update.message.text.strip()
+    phone = update.message.text.strip()
+    context.user_data['phone_number'] = phone
     selected_nums = context.user_data['selected_numbers']
+    user = update.effective_user
+
+    # አድሚን ከሆነ በነፃ ወዲያውኑ ይያዝለት (ስክሪንሾት እና ክፍያ ሳითხየው)
+    if user.id == ADMIN_ID:
+        full_name = context.user_data.get('full_name')
+        conn = sqlite3.connect("edu_mezenna.db")
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR REPLACE INTO users (user_id, full_name, phone_number) VALUES (?, ?, ?)", (user.id, full_name, phone))
+        for num in selected_nums:
+            cursor.execute("UPDATE numbers SET status = 'BOOKED', user_id = ? WHERE number = ?", (user.id, num))
+        conn.commit()
+        conn.close()
+
+        nums_str = ", ".join(map(str, selected_nums))
+        await update.message.reply_text(
+            f"👑 **አድሚን (በነፃ የተያዘ):**\n\n"
+            f"👤 ስም: {full_name}\n"
+            f"📞 ስልክ: {phone}\n"
+            f"🔢 የያዟቸው ቁጥሮች: **{nums_str}**\n\n"
+            "መልካም ዕድል!!",
+            reply_markup=get_main_keyboard(True),
+            parse_mode="Markdown"
+        )
+        return ConversationHandler.END
+
     total_price = len(selected_nums) * 100
     nums_str = ", ".join(map(str, selected_nums))
     payment_text = (
@@ -229,7 +235,7 @@ async def receive_phone_number(update: Update, context: ContextTypes.DEFAULT_TYP
         "📱 **Telebirr:**\n`0941506799`\n\n"
         "🏦 **Dashen Bank:**\n`5273247599011`"
     )
-    await update.message.reply_text(payment_text, reply_markup=get_back_keyboard(), parse_mode="Markdown")
+    await update.message.reply_text(payment_text, parse_mode="Markdown", reply_markup=get_back_keyboard())
     return PAYMENT_SCREENSHOT
 
 async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -362,7 +368,6 @@ async def show_all_numbers_admin(update: Update, context: ContextTypes.DEFAULT_T
     for r in rows:
         num, status, phone = r
         if status == 'BOOKED' or status == 'PENDING':
-            # ሙሉ ስልክ ቁጥሩን ማሳየት (ማስክ (mask) ሳይደረግ)
             full_phone = phone if phone else "ያለ ስልክ"
             icon = "✅" if status == 'BOOKED' else "🟡"
             msg += f"{num} 👉 {full_phone} {icon}\n"
@@ -383,11 +388,11 @@ async def release_number_prompt(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data['admin_action_type'] = 'release'
     return ADMIN_ACTION
 
-async def add_numbers_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def update_limit_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
-    await update.message.reply_text("➕ ወደ ዳታቤዝ ለመጨመር ወይም አጠቃላይ ብዛቱን ለማስተካከል የሚፈልጉትን ከፍተኛ ቁጥር ያስገቡ (ለምሳሌ: `250`):", reply_markup=get_back_keyboard())
-    context.user_data['admin_action_type'] = 'add'
+    await update.message.reply_text("🔄 አጠቃላይ የዕጣ ቁጥሮችን ገደብ መቀየር ወይም ማስተካከል የሚፈልጉትን አዲስ ቁጥር ያስገቡ (ለምሳሌ: አጠቃላይ ብዛቱን ወደ `150` ለመቀነስ ወይም ወደ `250` ለመጨመር አሁን የሚፈልጉትን የመጨረሻ ቁጥር ይጻፉ):", reply_markup=get_back_keyboard())
+    context.user_data['admin_action_type'] = 'update_limit'
     return ADMIN_ACTION
 
 async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -408,17 +413,19 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
         conn.commit()
         conn.close()
         await update.message.reply_text(f"✅ ቁጥር **{num}** ተሰርዞ አሁን ነፃ (AVAILABLE) ሆኗል!", reply_markup=get_main_keyboard(True), parse_mode="Markdown")
-    elif action_type == 'add':
+    elif action_type == 'update_limit':
         if not text.isdigit():
             await update.message.reply_text("እባክዎ ትክክለኛ ቁጥር ያስገቡ:", reply_markup=get_back_keyboard())
             conn.close()
             return ADMIN_ACTION
-        max_num = int(text)
-        for i in range(1, max_num + 1):
+        new_limit = int(text)
+        # አዲስ ገደብ ማስተካከል (የበለጠውን መሰረዝ ወይም አዳዲሶችን መጨመር)
+        cursor.execute("DELETE FROM numbers WHERE number > ?", (new_limit,))
+        for i in range(1, new_limit + 1):
             cursor.execute("INSERT OR IGNORE INTO numbers (number, status) VALUES (?, 'AVAILABLE')", (i,))
         conn.commit()
         conn.close()
-        await update.message.reply_text(f"✅ እስከ **{max_num}** ያሉት ቁጥሮች ተስተካክለዋል/ተጨምረዋል!", reply_markup=get_main_keyboard(True), parse_mode="Markdown")
+        await update.message.reply_text(f"✅ የዕጣው አጠቃላይ ቁጥር ገደብ በተሳካ ሁኔታ ወደ **{new_limit}** ተስተካክሏል!", reply_markup=get_main_keyboard(True), parse_mode="Markdown")
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -473,7 +480,7 @@ def main():
     admin_conv_handler = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex("^🗑 ቁጥር መሰረዝ \\(Release\\)$"), release_number_prompt),
-            MessageHandler(filters.Regex("^➕ አዲስ ቁጥሮችን መጨመር$"), add_numbers_prompt)
+            MessageHandler(filters.Regex("^🔄 የዕጣ አጠቃላይ ብዛት ማስተካከል \\(መጨመር/መቀነስ\\)$"), update_limit_prompt)
         ],
         states={
             ADMIN_ACTION: [
