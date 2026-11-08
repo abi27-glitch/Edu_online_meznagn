@@ -3,7 +3,7 @@ import sqlite3
 import logging
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -11,6 +11,7 @@ from telegram.ext import (
     ContextTypes,
     filters,
     ConversationHandler,
+    CallbackQueryHandler,
 )
 from dotenv import load_dotenv
 
@@ -71,14 +72,10 @@ init_db()
 # ዋና ሜኑ
 def get_main_keyboard():
     keyboard = [
-        [ReplyKeyboardRemove()],
-        [("🔢 ቁጥር መያዝ"), ("📋 ነፃ ቁጥሮች ማየት")],
-        [("ℹ️ መረጃ"), ("📞 እገዛ")]
-    ]
-    return ReplyKeyboardMarkup([
         ["🔢 ቁጥር መያዝ", "📋 ነፃ ቁጥሮች ማየት"],
         ["ℹ️ መረጃ", "📞 እገዛ"]
-    ], resize_keyboard=True)
+    ]
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # /start ትዕዛዝ
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -142,8 +139,9 @@ async def receive_number(update: Update, context: ContextTypes.DEFAULT_TYPE):
     row = cursor.fetchone()
     conn.close()
 
+    # ደንበኛ የተያዘ ቁጥር ከመረጠ
     if not row or row[0] != 'AVAILABLE':
-        await update.message.reply_text(f"ይቅርታ! ቁጥር **{num}** უკვე ተይዟል ወይም ሌላ ቁጥር ይሞክሩ:", parse_mode="Markdown")
+        await update.message.reply_text(f"⚠️ ይቅርታ! ቁጥር **{num}** უკვე ተይዟል ወይም በእንቅስቃሴ ላይ ነው። እባክዎ ሌላ ነፃ ቁጥር ይምረጡ:", parse_mode="Markdown")
         return SELECTING_NUMBER
 
     context.user_data['selected_number'] = num
@@ -195,12 +193,12 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(
         "✅ **ክፍያዎ በትክክል ተልኳል!**\n\n"
-        "አድሚኑ ክፍያውን አረጋግጦ ቁጥርዎን እስከሚያጸድቅ ድረስ በትዕግስት ይጠብቁ። እናመሰግናለን!",
+        "አድሚኑ ክፍያውን አረጋግጦ ቁጥርዎን እስከሚያጸድቅ ድረስ በትንሽ ቆይታ ይጠብቁ። እናመሰግናለን!",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
 
-    # አድሚን ካለ ለአድሚን ማሳወቅ ይቻላል
+    # ለአድሚን ማሳወቂያ እና የማረጋገጫ ቁልፎች መላክ
     if ADMIN_ID != 0:
         try:
             admin_msg = (
@@ -210,11 +208,76 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"🔢 የተመረጠ ቁጥር: {num}\n"
                 f"🆔 ዩዘር ID: {user.id}"
             )
-            await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_file, caption=admin_msg, parse_mode="Markdown")
+            keyboard = [
+                [
+                    InlineKeyboardButton("✅ ክፍያው ትክክል ነው", callback_data=f"approve_{user.id}_{num}"),
+                    InlineKeyboardButton("❌ ክፍያው ትክክል አይደለም", callback_data=f"reject_{user.id}_{num}")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_photo(chat_id=ADMIN_ID, photo=photo_file, caption=admin_msg, reply_markup=reply_markup, parse_mode="Markdown")
         except Exception as e:
             logger.error(f"አድሚን ዘንድ መላክ አልተቻለም: {e}")
 
     return ConversationHandler.END
+
+# ----------------- የአድሚን ውሳኔ (Callback Query) -----------------
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data  # አሰራሩ: approve_USERID_NUM ወይም reject_USERID_NUM
+    parts = data.split("_")
+    action = parts[0]
+    target_user_id = int(parts[1])
+    num = int(parts[2])
+
+    conn = sqlite3.connect("edu_mezenna.db")
+    cursor = conn.cursor()
+
+    if action == "approve":
+        # ቁጥሩን BOOKED ማድረግ
+        cursor.execute("UPDATE numbers SET status = 'BOOKED' WHERE number = ?", (num,))
+        cursor.execute("UPDATE transactions SET status = 'APPROVED' WHERE user_id = ? AND number = ?", (target_user_id, num))
+        
+        # የተጠቃሚውን ስም እና ስልክ ማምጣት
+        cursor.execute("SELECT full_name, phone_number FROM users WHERE user_id = ?", (target_user_id,))
+        user_row = cursor.fetchone()
+        conn.commit()
+        conn.close()
+
+        if user_row:
+            f_name, f_phone = user_row
+            success_msg = (
+                f"🎉 **እንኳን ደስ አለዎት! ክፍያዎ ጸድቋል!**\n\n"
+                f"👤 ስም: {f_name}\n"
+                f"📞 ስልክ: {f_phone}\n"
+                f"🔢 የያዙት ቁጥር: **{num}**\n\n"
+                f"መልካም ዕድል!!"
+            )
+            try:
+                await context.bot.send_message(chat_id=target_user_id, text=success_msg, parse_mode="Markdown")
+            except Exception as e:
+                logger.error(f"ለተጠቃሚው ማሳወቂያ መላክ አልተቻለም: {e}")
+
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n✅ **ሁኔታ:** ክፍያው በአድሚን ጸድቋል!")
+
+    elif action == "reject":
+        # ቁጥሩን መልሶ AVAILABLE ማድረግ (እንዳይያዝ ማድረግ)
+        cursor.execute("UPDATE numbers SET status = 'AVAILABLE', user_id = NULL WHERE number = ?", (num,))
+        cursor.execute("UPDATE transactions SET status = 'REJECTED' WHERE user_id = ? AND number = ?", (target_user_id, num))
+        conn.commit()
+        conn.close()
+
+        reject_msg = (
+            f"❌ **ይቅርታ! ክፍያዎ ተቀባይነት አላገኘም (ውድቅ ተደርጓል)**\n\n"
+            f"የመረጡት ቁጥር (**{num}**) ተሰርዟል። እባክዎ ትክክለኛ የክፍያ ስክሪንሾት በመላክ እንደገና ይሞክሩ።"
+        )
+        try:
+            await context.bot.send_message(chat_id=target_user_id, text=reject_msg, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"ለተጠቃሚው ውድቅ መደረጉን መላክ አልተቻለም: {e}")
+
+        await query.edit_message_caption(caption=f"{query.message.caption}\n\n❌ **ሁኔታ:** ክፍያው ውድቅ ተደርጓል!")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("ምዝገባው ተሰርዟል።", reply_markup=get_main_keyboard())
@@ -228,7 +291,7 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(text, reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
-# 📞 እገዛ (አድሚን ስልክ ቁጥርን ጨምሮ)
+# 📞 እገዛ
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "📞 **እገዛ እና ድጋፍ፦**\n\n"
@@ -273,6 +336,7 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(conv_handler)
+    application.add_handler(CallbackQueryHandler(admin_callback))
     application.add_handler(MessageHandler(filters.Regex("^📋 ነፃ ቁጥሮች ማየት$"), show_free_numbers))
     application.add_handler(MessageHandler(filters.Regex("^ℹ️ መረጃ$"), info_handler))
     application.add_handler(MessageHandler(filters.Regex("^📞 እገዛ$"), help_handler))
