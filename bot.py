@@ -200,7 +200,6 @@ async def receive_phone_number(update: Update, context: ContextTypes.DEFAULT_TYP
     selected_nums = context.user_data['selected_numbers']
     user = update.effective_user
 
-    # አድሚን ከሆነ በነፃ ወዲያውኑ ይያዝለት (ስክሪንሾት እና ክፍያ ሳითხየው)
     if user.id == ADMIN_ID:
         full_name = context.user_data.get('full_name')
         conn = sqlite3.connect("edu_mezenna.db")
@@ -419,7 +418,6 @@ async def handle_admin_action(update: Update, context: ContextTypes.DEFAULT_TYPE
             conn.close()
             return ADMIN_ACTION
         new_limit = int(text)
-        # አዲስ ገደብ ማስተካከል (የበለጠውን መሰረዝ ወይም አዳዲሶችን መጨመር)
         cursor.execute("DELETE FROM numbers WHERE number > ?", (new_limit,))
         for i in range(1, new_limit + 1):
             cursor.execute("INSERT OR IGNORE INTO numbers (number, status) VALUES (?, 'AVAILABLE')", (i,))
